@@ -130,6 +130,20 @@ final class PaperclipCrewService: ObservableObject {
     @Published private(set) var pending: Set<String> = []
     /// The last command that failed, shown on the card for a moment.
     @Published private(set) var failure: (agentID: String, message: String, date: Date)?
+    /// Starting the server from the notch, from the press until it answers.
+    @Published private(set) var launch: Launch = .none
+
+    enum Launch: Equatable {
+        case none
+        case starting(since: Date)
+        /// It never answered; the log says why.
+        case failed
+    }
+
+    /// A first run checks and repairs the install before it serves, which
+    /// can take a while on a cold Mac.
+    private static let launchPatience: TimeInterval = 90
+    private static let launchInterval: TimeInterval = 1
 
     /// While anyone works the card reads every few seconds; a quiet crew less often.
     private static let busyInterval: TimeInterval = 3
@@ -185,6 +199,7 @@ final class PaperclipCrewService: ObservableObject {
     /// Stops reading and forgets the crew, as when the section is turned off.
     func stop() {
         running = false
+        launch = .none
         timer?.invalidate(); timer = nil
         if snapshot != PaperclipCrewSnapshot() { snapshot = PaperclipCrewSnapshot() }
         pending = []
@@ -209,6 +224,10 @@ final class PaperclipCrewService: ObservableObject {
                 var next = next
                 next.finished = self.finishedTimes(from: self.snapshot, to: next)
                 if next != self.snapshot { self.snapshot = next }
+                if case .starting(let since) = self.launch {
+                    if next.reachable { self.launch = .none }
+                    else if Date().timeIntervalSince(since) > Self.launchPatience { self.launch = .failed }
+                }
                 self.schedule()
             }
         }
@@ -226,8 +245,9 @@ final class PaperclipCrewService: ObservableObject {
 
     private func schedule() {
         timer?.invalidate()
-        let interval = snapshot.isWorking || !pending.isEmpty || !snapshot.finished.isEmpty
-            ? Self.busyInterval : Self.quietInterval
+        let starting = if case .starting = launch { true } else { false }
+        let interval = starting ? Self.launchInterval
+            : snapshot.isWorking || !pending.isEmpty || !snapshot.finished.isEmpty ? Self.busyInterval : Self.quietInterval
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in self?.refresh() }
         timer.tolerance = interval * 0.2
         RunLoop.main.add(timer, forMode: .common)
@@ -332,6 +352,50 @@ final class PaperclipCrewService: ObservableObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.refresh() }
             }
         }
+    }
+
+    // MARK: Starting the server
+
+    /// Where the `paperclipai` command lives: the one in Settings, or the
+    /// places its installer and Homebrew put it. An app opened from the Dock
+    /// has no shell PATH to search.
+    static func launcherPath(in defaults: UserDefaults = .standard) -> String? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let custom = (defaults.string(forKey: DefaultsKey.paperclipCrewCommand) ?? "").trimmed
+        let candidates = custom.isEmpty
+            ? [home + "/.local/bin/paperclipai", "/opt/homebrew/bin/paperclipai", "/usr/local/bin/paperclipai"]
+            : [(custom as NSString).expandingTildeInPath]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// Only a server on this Mac can be started from here.
+    static func canLaunch(in defaults: UserDefaults = .standard) -> Bool {
+        guard let host = baseURL(in: defaults)?.host?.lowercased() else { return false }
+        return ["127.0.0.1", "localhost", "::1", "[::1]"].contains(host) && launcherPath(in: defaults) != nil
+    }
+
+    static var launchLog: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/Logs/Vorssaint/paperclip-run.log")
+    }
+
+    /// Runs `paperclipai run` in its own session, so the server keeps going
+    /// after this app quits, with its output kept in a log to read if it
+    /// never answers.
+    func startServer() {
+        if case .starting = launch { return }
+        guard !snapshot.reachable, Self.canLaunch(), let launcher = Self.launcherPath() else { return }
+        let log = Self.launchLog
+        try? FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
+        do {
+            // The shell only redirects and then becomes the launcher.
+            try DetachedProcess.spawn("/bin/sh", ["-c", "exec \"$0\" run >>\"$1\" 2>&1", launcher, log.path])
+        } catch {
+            launch = .failed
+            return
+        }
+        launch = .starting(since: Date())
+        if !running { syncWithPreferences() } else { schedule() }
     }
 
     /// Opens the agent's page in Paperclip's own interface.

@@ -95,15 +95,58 @@ struct NotchCrewCard: View {
     }
 
     private var offline: some View {
-        HStack(spacing: 10) {
-            NotchCrewAvatar(agentID: "paperclip", state: .offline, size: 26)
+        let starting = if case .starting = crew.launch { true } else { false }
+        let failed = crew.launch == .failed
+        let canLaunch = PaperclipCrewService.canLaunch()
+        return HStack(spacing: 10) {
+            // Waking the server wakes the face too.
+            NotchCrewAvatar(agentID: "paperclip", state: starting ? .working : failed ? .waiting : .offline, size: 26)
             VStack(alignment: .leading, spacing: 2) {
-                Text(NotchCrewStrings.offline).font(.system(size: 11, weight: .medium))
-                Text(NotchCrewStrings.offlineHint).font(.system(size: 9.5, design: .monospaced)).foregroundStyle(.secondary)
+                Text(starting ? NotchCrewStrings.startingServer : failed ? NotchCrewStrings.startFailed
+                     : NotchCrewStrings.offline)
+                    .font(.system(size: 11, weight: .medium))
+                Text(starting ? NotchCrewStrings.startingHint : canLaunch ? NotchCrewStrings.offlineCanStart
+                     : NotchCrewStrings.offlineHint)
+                    .font(.system(size: 9.5, design: canLaunch || starting ? .default : .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 4)
+            if starting {
+                ProgressView().controlSize(.small)
+            } else if canLaunch {
+                HStack(spacing: 6) {
+                    if failed {
+                        pill(NotchCrewStrings.openLog, symbol: "doc.text", prominent: false) {
+                            NSWorkspace.shared.open(PaperclipCrewService.launchLog)
+                        }
+                    }
+                    pill(failed ? NotchCrewStrings.tryAgain : NotchCrewStrings.startServer, symbol: "power") {
+                        crew.startServer()
+                    }
+                }
+            }
         }
         .frame(maxHeight: .infinity)
+        .animation(.snappy(duration: 0.2), value: crew.launch)
+    }
+
+    private func pill(_ title: String, symbol: String, prominent: Bool = true,
+                      action: @escaping () -> Void) -> some View {
+        let tint = Color(red: 0.55, green: 0.78, blue: 1)
+        return Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: symbol).imageScale(.small)
+                Text(title).lineLimit(1)
+            }
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(prominent ? AnyShapeStyle(tint) : AnyShapeStyle(.white.opacity(0.85)))
+            .padding(.horizontal, 10)
+            .frame(height: 22)
+            .background(prominent ? tint.opacity(0.2) : .white.opacity(0.1), in: Capsule(style: .continuous))
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: 11))
     }
 }
 

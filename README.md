@@ -5,12 +5,76 @@
   </picture>
 </p>
 
-<h1 align="center">Vorssaint</h1>
+<h1 align="center">Vorssaint + Paperclip crew</h1>
 
 <p align="center">
-  One menu bar icon doing the job of a dozen paid Mac apps.<br>
-  Free, open source, and local-first.
+  An unofficial fork of <a href="https://github.com/vorssaint/vorssaint-utils">Vorssaint</a> that puts your
+  <a href="https://github.com/paperclipai/paperclip">Paperclip</a> AI agents in the Dynamic Island.<br>
+  Watch them work, and wake, pause or resume them without leaving what you are doing.
 </p>
+
+> [!IMPORTANT]
+> **This is not an official Vorssaint release.** It is a personal fork that adds a Paperclip integration on top of
+> the upstream source. The Vorssaint name, logo and icon belong to the Vorssaint project
+> (see [TRADEMARKS.md](TRADEMARKS.md)); build it yourself as the Developer variant described below, and do not
+> redistribute builds under the Vorssaint name. Everything else in this README describes upstream Vorssaint, and the
+> download links and badges point to the official upstream project, whose builds do **not** include the crew.
+> Support for the Paperclip integration comes from this fork's issues, not from the Vorssaint maintainers.
+
+## Paperclip crew
+
+[Paperclip](https://github.com/paperclipai/paperclip) runs a company of AI agents on your Mac (a Chief of Staff,
+engineers, a security reviewer and so on), each one a Claude Code or Codex process it starts on a schedule or on
+demand. Vorssaint's own AI page follows agents through the logs they keep in your home folder, but Paperclip gives
+every agent a private temporary config folder, so those agents never showed up. This fork reads them from the
+Paperclip server instead.
+
+**What you get**
+
+- **A face for every agent.** Each agent gets a small character, built from simple shapes, a color and one accessory
+  picked from its Paperclip id, so it looks the same every time. Its motion is its status:
+
+  | State | What the face does |
+  |---|---|
+  | Idle | Calm and curious: it blinks and looks around |
+  | Working | Bobs steadily, eyes moving as if reading |
+  | Needs you (error, out of budget, waiting for board approval) | Sways with wide eyes and an amber dot |
+  | Just finished | Happy eyes and a little hop, then it settles |
+  | Paused | Asleep |
+
+- **A Crew card on the AI page.** Every agent, working ones first, with what it is doing right now (the tool it is
+  using, the last thing it said, or the run's phase) and how long it has been at it. Hover a row to see the run's
+  steps and the agent's budget; double-click to open the agent in Paperclip.
+- **One-button controls.** Each row carries the command that fits: **Wake** an idle agent, **Pause** a working one,
+  **Resume** a paused one.
+- **The closed island.** While your crew works, up to three faces sit beside the camera with a running clock.
+- **Start Paperclip from the notch.** When the server is not running, the card offers **Start Paperclip**, which
+  runs `paperclipai run` in the background. The server keeps running after Vorssaint quits, and its output goes to
+  `~/Library/Logs/Vorssaint/paperclip-run.log`.
+
+**Set it up**
+
+1. Install and onboard Paperclip (`paperclipai onboard`, then `paperclipai run` once) so a local instance exists.
+2. Build and install this fork (see [Build it yourself](#build-it-yourself)), then quit the official Vorssaint if
+   it is running: only one app can own the notch.
+3. In the Developer app, turn on **Dynamic Island** and its **AI** section. The Crew card appears at the top of the
+   AI page.
+4. Optional, under Settings → Dynamic Island → AI → **Paperclip crew**:
+   - **Server**: defaults to `http://127.0.0.1:3100`.
+   - **Company**: a name or id. Left empty, the card follows the first company that has agents.
+   - **Start command**: the path to `paperclipai`, if it is not in `~/.local/bin`, `/opt/homebrew/bin` or
+     `/usr/local/bin`.
+
+**How it works and what it touches**
+
+- It talks only to the Paperclip server you point it at, over its HTTP API: `GET /api/companies`,
+  `/api/companies/:id/agents` and `/api/companies/:id/live-runs` to read, and `POST /api/agents/:id/wakeup`,
+  `/pause` or `/resume` when you press a button. It reads every 3 seconds while agents work and every 12 when they
+  are quiet, and stops when the island is away.
+- It needs Paperclip in **local trusted** mode, the default for a local install, where loopback requests need no
+  key. Nothing is sent anywhere else, and no Paperclip credential is read or stored.
+- The Start button only appears for a server on this Mac (`127.0.0.1` or `localhost`).
+- The crew's text is in English only for now.
 
 <p align="center">
   <a href="https://vorssaint.com">Website</a> ·
@@ -132,6 +196,8 @@ Reorder or hide panel sections, choose a compact layout, and export settings to 
 ### Everyday tools
 
 - **Dynamic Island.** Keep music, notifications, calendars, timers, downloads and everyday controls around the camera cutout, or a simulated one on other Macs. Customize sections and shortcuts, with optional lyrics, a live equalizer, camera preview and file tools.
+- **Paperclip crew** *(this fork)*. Your Paperclip agents in the Dynamic Island as animated faces, with Wake,
+  Pause and Resume, and a button to start the server. See [Paperclip crew](#paperclip-crew).
 - **AI agents.** Follow Claude, Codex and OpenCode in the Dynamic Island: plan limits and when they reset, tokens, API value, models, projects and live work, with a notice when a long task finishes. Codex's banked resets can be used from there too.
 - **Command Bar.** Search apps, windows, files, clipboard history, snippets and app menu commands from one field. Calculate, convert units, find emoji or run saved scripts.
 - **Quick panel.** Open a floating palette of favorite tools with ⌃⌘V.
@@ -194,7 +260,7 @@ To remove Vorssaint completely, including its settings and permissions:
 
 ## Private by default
 
-Vorssaint is local-first, with no account, analytics or tracking. The network is touched only by things you can see: update checks, the speed test, Homebrew actions, optional online lyric lookup, temporary screenshot or recording links and feedback you explicitly send. The full story is in the [privacy notes](docs/PRIVACY.md).
+Vorssaint is local-first, with no account, analytics or tracking. The network is touched only by things you can see: update checks, the speed test, Homebrew actions, optional online lyric lookup, temporary screenshot or recording links and feedback you explicitly send. This fork's Paperclip crew adds one more: requests to the Paperclip server you configure, by default the one on this Mac. The full story is in the [privacy notes](docs/PRIVACY.md).
 
 Permissions get the same treatment. Every one is optional, the app explains each in plain words, shows which features actually use it, and even tells you when a permission you granted is no longer needed by anything, with a shortcut to revoke it.
 
@@ -212,11 +278,16 @@ See the [permissions guide](docs/PERMISSIONS.md) for which features need access 
 ### Build it yourself
 
 ```sh
-git clone https://github.com/vorssaint/vorssaint-utils.git
+git clone https://github.com/mseo0/vorssaint-utils.git   # this fork, with the Paperclip crew
 cd vorssaint-utils
 ./build.sh --dev            # build the separate Developer variant
 ./build.sh --dev --install  # install and launch it
+./build.sh --test           # run the test suite, including the crew's
 ```
+
+The Developer variant has its own bundle identifier, settings and permissions, so it sits beside the official app
+without replacing it. For upstream Vorssaint without the crew, clone
+`https://github.com/vorssaint/vorssaint-utils.git` instead.
 
 Xcode Command Line Tools are the only requirement. The [contributing guide](CONTRIBUTING.md) covers the layout and conventions. Official builds come only from the maintainer: the GPL covers the source, while the Vorssaint name, icon and look are covered by [TRADEMARKS.md](TRADEMARKS.md), so forks need their own identity.
 

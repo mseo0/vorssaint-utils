@@ -26,6 +26,7 @@ struct NotchAgentsSettingsControls: View {
     @AppStorage(DefaultsKey.paperclipCrewEnabled) private var crewEnabled = true
     @AppStorage(DefaultsKey.paperclipCrewURL) private var crewURL = PaperclipCrewService.defaultURL
     @AppStorage(DefaultsKey.paperclipCrewCompany) private var crewCompany = ""
+    @AppStorage(DefaultsKey.paperclipCrewCommand) private var crewCommand = ""
     @State private var dragging: NotchAgentCard?
     @State private var roots: [AgentProvider: Bool] = [:]
     @State private var claudeApp: URL?
@@ -146,6 +147,12 @@ struct NotchAgentsSettingsControls: View {
                 }
                 SettingsRow(symbol: "building.2", title: "Company", caption: "Name or id; empty follows the first one.") {
                     TextField("First company", text: $crewCompany)
+                        .textFieldStyle(.roundedBorder).frame(width: 200)
+                }
+                SettingsRow(symbol: "terminal", title: "Start command",
+                            caption: PaperclipCrewService.launcherPath().map { "Starts with \($0) run" }
+                                ?? "paperclipai wasn’t found; give its full path.") {
+                    TextField("~/.local/bin/paperclipai", text: $crewCommand)
                         .textFieldStyle(.roundedBorder).frame(width: 200)
                 }
             }

@@ -840,6 +840,7 @@ enum DefaultsKey {
     static let paperclipCrewEnabled = "paperclipCrewEnabled"
     static let paperclipCrewURL = "paperclipCrewURL"
     static let paperclipCrewCompany = "paperclipCrewCompany"
+    static let paperclipCrewCommand = "paperclipCrewCommand"
     static let notchEnabled = "notchEnabled"
     static let notchDisplay = "notchDisplay"
     // How the island looks on a display without a camera housing.
@@ -1393,6 +1394,7 @@ enum Defaults {
         DefaultsKey.paperclipCrewEnabled: true,
         DefaultsKey.paperclipCrewURL: PaperclipCrewService.defaultURL,
         DefaultsKey.paperclipCrewCompany: "",
+        DefaultsKey.paperclipCrewCommand: "",
         DefaultsKey.notchLyricsEnabled: true,
         DefaultsKey.notchLyricsOnline: false,
         DefaultsKey.notchLiveEqualizer: false,

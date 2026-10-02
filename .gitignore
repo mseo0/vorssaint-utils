@@ -23,3 +23,10 @@ AGENTS.md
 *.xcodeproj
 xcuserdata/
 .swiftpm/
+
+# Local secrets, logs and assistant state: never commit
+.env
+.env.*
+*.log
+.claude/
+CLAUDE.local.md

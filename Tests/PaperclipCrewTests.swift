@@ -11,6 +11,7 @@ enum PaperclipCrewTests {
         states(suite)
         ordering(suite)
         layout(suite)
+        launching(suite)
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ json: String) -> T? {
@@ -117,5 +118,29 @@ enum PaperclipCrewTests {
         suite.expect(NotchAgentSupport.height(of: [crew]) == NotchAgentSupport.crewHeight,
                      "The crew card's row is tall enough for its list")
         suite.expect(NotchAgentStrings.enUS.card(.crew) == NotchCrewStrings.title, "The crew card has a name")
+    }
+
+    // MARK: Launching
+
+    private static func launching(_ suite: TestSuite) {
+        let name = "com.vorssaint.tests.paperclip-crew"
+        guard let defaults = UserDefaults(suiteName: name) else { return }
+        defaults.removePersistentDomain(forName: name)
+        defer { defaults.removePersistentDomain(forName: name) }
+
+        defaults.set("/bin/sh", forKey: DefaultsKey.paperclipCrewCommand)
+        suite.expect(PaperclipCrewService.launcherPath(in: defaults) == "/bin/sh",
+                     "A start command from Settings is used when it can run")
+        defaults.set("/nonexistent/paperclipai", forKey: DefaultsKey.paperclipCrewCommand)
+        suite.expect(PaperclipCrewService.launcherPath(in: defaults) == nil,
+                     "A start command that is not there offers no start button")
+
+        defaults.set("/bin/sh", forKey: DefaultsKey.paperclipCrewCommand)
+        defaults.set("http://127.0.0.1:3100", forKey: DefaultsKey.paperclipCrewURL)
+        suite.expect(PaperclipCrewService.canLaunch(in: defaults), "A server on this Mac can be started from the notch")
+        defaults.set("http://localhost:3100", forKey: DefaultsKey.paperclipCrewURL)
+        suite.expect(PaperclipCrewService.canLaunch(in: defaults), "localhost counts as this Mac")
+        defaults.set("http://studio.local:3100", forKey: DefaultsKey.paperclipCrewURL)
+        suite.expect(!PaperclipCrewService.canLaunch(in: defaults), "A server on another machine is never started from here")
     }
 }
