@@ -11,6 +11,7 @@ struct NotchAgentStrip: View {
     /// Another display's strip, when the island shows on every display.
     var displayGeometry: NotchGeometry? = nil
     @ObservedObject private var usage = AgentUsageService.shared
+    @ObservedObject private var crew = PaperclipCrewService.shared
     @ObservedObject private var l10n = L10n.shared
     @AppStorage(DefaultsKey.notchAgentsReadout) private var readout = NotchAgentReadout.elapsed.rawValue
     @AppStorage(DefaultsKey.notchAgentsLimitDisplay) private var display = NotchAgentLimitDisplay.remaining.rawValue
@@ -21,13 +22,20 @@ struct NotchAgentStrip: View {
         AgentProvider.allCases.filter { provider in live.contains { $0.provider == provider } }
     }
 
+    /// The Paperclip agents at work, longest running first; they take the
+    /// wing ahead of the local agents' marks, faces overlapping like a roster.
+    private var crewWorking: [PaperclipAgent] {
+        PaperclipCrewService.isEnabled() ? Array(crew.snapshot.working.prefix(3)) : []
+    }
+
     var body: some View {
         // Resolve layout once per presentation update. The timeline captures
         // these values, so ticking the clock never remeasures the island or
         // walks the preferences for every font, inset and frame.
         let geometry = displayGeometry ?? service.compactActivityGeometry
         let working = working
-        let tint = working.first?.tint ?? .white
+        let crewWorking = crewWorking
+        let tint = crewWorking.first.map { NotchCrewIdentity(id: $0.id).tint } ?? working.first?.tint ?? .white
         let budget = geometry.compactActivityContentHeight - NotchLayout.compactEdgeGap * 2
         let iconSize = min(working.count > 1 ? 11.0 : 14.0, max(8, budget - 4))
         let textSize = NotchAgentSupport.stripTextSize(height: geometry.compactActivityContentHeight)
@@ -39,7 +47,16 @@ struct NotchAgentStrip: View {
             Button { service.openActivity(.agents) } label: {
                 HStack(spacing: 1) {
                     if geometry.compactActivityWingWidth >= 28 {
-                        ForEach(working) { NotchAgentGlyph(provider: $0, size: iconSize) }
+                        if crewWorking.isEmpty {
+                            ForEach(working) { NotchAgentGlyph(provider: $0, size: iconSize) }
+                        } else {
+                            let face = min(16, max(9, budget - 2))
+                            HStack(spacing: -face * 0.3) {
+                                ForEach(crewWorking) { agent in
+                                    NotchCrewAvatar(agentID: agent.id, state: .working, size: face)
+                                }
+                            }
+                        }
                     }
                 }
                 .padding(.leading, iconInset)
@@ -79,7 +96,7 @@ struct NotchAgentStrip: View {
         .padding(.top, geometry.compactActivityTopPadding)
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(working.map(\.displayName).joined(separator: ", "))
+        .accessibilityLabel((crewWorking.map(\.name) + working.map(\.displayName)).joined(separator: ", "))
         .accessibilityValue(reading(at: Date()))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { service.openActivity(.agents) }

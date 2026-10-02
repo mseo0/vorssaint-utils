@@ -7,12 +7,13 @@ import Foundation
 /// The cards the AI page can show, in the order a person arranges them. Raw
 /// values are stored in the saved order, so cases are never renamed.
 enum NotchAgentCard: String, CaseIterable, Identifiable {
-    case limits, spend, live, trend, models, projects, activity, resets
+    case crew, limits, spend, live, trend, models, projects, activity, resets
 
     var id: String { rawValue }
 
     var symbol: String {
         switch self {
+        case .crew: return "person.3.fill"
         case .limits: return "gauge.with.dots.needle.33percent"
         case .spend: return "dollarsign.circle"
         case .live: return "waveform.path.ecg"
@@ -25,7 +26,7 @@ enum NotchAgentCard: String, CaseIterable, Identifiable {
     }
 
     /// Charts need the island's width; everything else pairs up.
-    var fullWidth: Bool { self == .trend || self == .activity }
+    var fullWidth: Bool { self == .trend || self == .activity || self == .crew }
 }
 
 /// What the closed island shows beside the camera while an agent works.
@@ -197,7 +198,10 @@ enum NotchAgentSupport {
                              display: NotchAgentLimitDisplay, focus: NotchAgentLimitFocus = .mostUsed,
                              now: Date) -> String {
         let live = snapshot.live
-        func elapsed() -> String { AgentFormat.clock(now.timeIntervalSince(live.map(\.started).min() ?? now)) }
+        let crewStart = PaperclipCrewService.isEnabled() ? PaperclipCrewService.shared.snapshot.earliestRunStart : nil
+        func elapsed() -> String {
+            AgentFormat.clock(now.timeIntervalSince((live.map(\.started) + [crewStart].compactMap { $0 }).min() ?? now))
+        }
         switch readout {
         case .elapsed:
             return elapsed()
@@ -225,6 +229,8 @@ enum NotchAgentSupport {
     static let spacing: CGFloat = 10
     static let cardHeight: CGFloat = 96
     static let chartHeight: CGFloat = 118
+    /// Room for five agents before the list scrolls.
+    static let crewHeight: CGFloat = 196
     /// Below this width every card takes a row of its own.
     static let pairWidth: CGFloat = 390
 
@@ -234,6 +240,8 @@ enum NotchAgentSupport {
             case .limits: return providers.map { NotchAgentTile(card: .limits, provider: $0) }
             // Banked resets belong to a Codex account.
             case .resets: return providers.contains(.codex) ? [NotchAgentTile(card: .resets, provider: .codex)] : []
+            // The Paperclip crew needs no local agent logs, only its server.
+            case .crew: return PaperclipCrewService.isEnabled() ? [NotchAgentTile(card: .crew, provider: nil)] : []
             default: return [NotchAgentTile(card: card, provider: nil)]
             }
         }
@@ -262,7 +270,8 @@ enum NotchAgentSupport {
     }
 
     static func height(of row: [NotchAgentTile]) -> CGFloat {
-        row.contains { $0.card.fullWidth } ? chartHeight : cardHeight
+        if row.contains(where: { $0.card == .crew }) { return crewHeight }
+        return row.contains { $0.card.fullWidth } ? chartHeight : cardHeight
     }
 
     static func contentHeight(_ rows: [[NotchAgentTile]]) -> CGFloat {

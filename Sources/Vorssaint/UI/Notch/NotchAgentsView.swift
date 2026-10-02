@@ -40,7 +40,7 @@ struct NotchAgentsView: View {
                     Text(text.loading).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if providers.isEmpty {
+            } else if providers.isEmpty && !PaperclipCrewService.isEnabled() {
                 NotchEmptyView(symbol: "sparkles", message: text.empty)
             } else if rows.isEmpty {
                 NotchEmptyView(symbol: "square.grid.2x2", message: text.noCards)
@@ -77,6 +77,8 @@ struct NotchAgentsView: View {
         let snapshot = usage.snapshot
         let shown = chosenPeriod
         switch tile.card {
+        case .crew:
+            NotchCrewCard()
         case .limits:
             if let provider = tile.provider {
                 NotchAgentLimitsCard(provider: provider, snapshot: snapshot, now: now,

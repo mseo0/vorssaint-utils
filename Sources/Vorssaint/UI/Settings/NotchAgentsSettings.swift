@@ -23,6 +23,9 @@ struct NotchAgentsSettingsControls: View {
     @AppStorage(DefaultsKey.notchAgentsLimitThreshold) private var limitThreshold = NotchAgentSupport.defaultLimitThreshold
     @AppStorage(DefaultsKey.notchAgentsDailyBudget) private var dailyBudget = 0.0
     @AppStorage(DefaultsKey.notchAgentsPriceUpdates) private var priceUpdates = true
+    @AppStorage(DefaultsKey.paperclipCrewEnabled) private var crewEnabled = true
+    @AppStorage(DefaultsKey.paperclipCrewURL) private var crewURL = PaperclipCrewService.defaultURL
+    @AppStorage(DefaultsKey.paperclipCrewCompany) private var crewCompany = ""
     @State private var dragging: NotchAgentCard?
     @State private var roots: [AgentProvider: Bool] = [:]
     @State private var claudeApp: URL?
@@ -129,6 +132,22 @@ struct NotchAgentsSettingsControls: View {
                 .fixedSize(horizontal: false, vertical: true)
             SettingsRow(symbol: "arrow.triangle.2.circlepath", title: text.priceUpdates, caption: priceCaption) {
                 Toggle(text.priceUpdates, isOn: $priceUpdates).labelsHidden().toggleStyle(.switch)
+            }
+
+            Divider()
+            SettingsRow(symbol: NotchAgentCard.crew.symbol, title: "Paperclip crew",
+                        caption: "Agents from a Paperclip server on this Mac, with Wake, Pause and Resume.") {
+                Toggle("Paperclip crew", isOn: $crewEnabled).labelsHidden().toggleStyle(.switch)
+            }
+            if crewEnabled {
+                SettingsRow(symbol: "link", title: "Server") {
+                    TextField(PaperclipCrewService.defaultURL, text: $crewURL)
+                        .textFieldStyle(.roundedBorder).frame(width: 200)
+                }
+                SettingsRow(symbol: "building.2", title: "Company", caption: "Name or id; empty follows the first one.") {
+                    TextField("First company", text: $crewCompany)
+                        .textFieldStyle(.roundedBorder).frame(width: 200)
+                }
             }
 
             if claude {

@@ -837,6 +837,9 @@ enum DefaultsKey {
     static let notchAgentsLimitThreshold = "notchAgentsLimitThreshold"
     static let notchAgentsDailyBudget = "notchAgentsDailyBudget"
     static let notchAgentsPriceUpdates = "notchAgentsPriceUpdates"
+    static let paperclipCrewEnabled = "paperclipCrewEnabled"
+    static let paperclipCrewURL = "paperclipCrewURL"
+    static let paperclipCrewCompany = "paperclipCrewCompany"
     static let notchEnabled = "notchEnabled"
     static let notchDisplay = "notchDisplay"
     // How the island looks on a display without a camera housing.
@@ -1387,6 +1390,9 @@ enum Defaults {
         DefaultsKey.notchAgentsLimitThreshold: NotchAgentSupport.defaultLimitThreshold,
         DefaultsKey.notchAgentsDailyBudget: 0.0,
         DefaultsKey.notchAgentsPriceUpdates: true,
+        DefaultsKey.paperclipCrewEnabled: true,
+        DefaultsKey.paperclipCrewURL: PaperclipCrewService.defaultURL,
+        DefaultsKey.paperclipCrewCompany: "",
         DefaultsKey.notchLyricsEnabled: true,
         DefaultsKey.notchLyricsOnline: false,
         DefaultsKey.notchLiveEqualizer: false,

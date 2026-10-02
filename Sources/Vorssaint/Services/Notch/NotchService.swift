@@ -259,8 +259,18 @@ final class NotchService: ObservableObject {
         NotchSupport.showsMusicActivity(isPlaying: NotchMusicService.shared.playback?.isPlaying == true)
     }
 
+    /// How many marks the agent strip shows: the local agents at work, or
+    /// up to three Paperclip faces, whichever is more.
+    private var agentMarkCount: Int {
+        let local = Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count
+        let crew = PaperclipCrewService.isEnabled() ? min(3, PaperclipCrewService.shared.snapshot.working.count) : 0
+        return max(local, crew)
+    }
+
     var hasAgentActivity: Bool {
-        NotchAgentSupport.showsLiveActivity() && !AgentUsageService.shared.snapshot.live.isEmpty
+        NotchAgentSupport.showsLiveActivity()
+            && (!AgentUsageService.shared.snapshot.live.isEmpty
+                || (PaperclipCrewService.isEnabled() && PaperclipCrewService.shared.snapshot.isWorking))
     }
 
     var hasCalendarActivity: Bool {
@@ -468,7 +478,7 @@ final class NotchService: ObservableObject {
         case .music:
             return provisional.compactMusicArtworkSide + provisional.compactMusicArtworkInset
         case .agents:
-            let working = Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count
+            let working = agentMarkCount
             let side = NotchTimerSupport.stripAgentMarkSize(height: height, working: working)
             return CGFloat(max(1, working)) * (side * 1.45 + 1) + CGFloat(max(0, working - 1))
                 + provisional.compactActivityEdgeInset(boxHeight: side + 4, radius: (side + 4) / 2)
@@ -505,7 +515,7 @@ final class NotchService: ObservableObject {
         let reading = width.rounded(.up) + provisional.compactActivityEdgeInset(boxHeight: size * 0.72, radius: 0)
         // The marks on the other side, drawn as the strip draws them: two
         // working agents share a smaller size, each in a frame wider than it.
-        let working = Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count
+        let working = agentMarkCount
         let mark = CGFloat(working > 1 ? 11 : 14)
         let frame = mark * 1.45 + 1
         let marks = CGFloat(max(1, working)) * frame + CGFloat(max(0, working - 1))
@@ -717,7 +727,7 @@ final class NotchService: ObservableObject {
         let layout = NotchCapsuleLayout.self
         let language = L10n.shared.language
         let download = NotchDownloadService.shared.items.first { $0.active && !$0.completed }
-        let working = Set(AgentUsageService.shared.snapshot.live.map(\.provider)).count
+        let working = agentMarkCount
         switch activity {
         case .music:
             let playback = heldMusic?.playback ?? NotchMusicService.shared.playback
@@ -809,6 +819,7 @@ final class NotchService: ObservableObject {
         // Paused while the island is away, the section still stops at once
         // when it is turned off.
         if !NotchAgentSupport.isEnabled() { AgentUsageService.shared.stop() }
+        if !PaperclipCrewService.isEnabled() { PaperclipCrewService.shared.stop() }
         guard !suspended else {
             if session.canRunTimer { NotchTimerService.shared.syncWithPreferences() }
             else { NotchTimerService.shared.suspend() }
@@ -824,6 +835,7 @@ final class NotchService: ObservableObject {
         NotchNotificationService.shared.syncWithPreferences()
         NotchAudioLevelService.shared.syncWithPreferences()
         AgentUsageService.shared.syncWithPreferences()
+        PaperclipCrewService.shared.syncWithPreferences()
         followsPointer = displayPreference == .pointer || displayPreference == .all
         showsOnAllDisplays = displayPreference == .all
         updateFullscreenDisplays()
@@ -878,6 +890,7 @@ final class NotchService: ObservableObject {
         NotchLyricsService.shared.stop()
         NotchFileToolsService.shared.stop()
         AgentUsageService.shared.stop()
+        PaperclipCrewService.shared.stop()
         guard running else { return }
         running = false
         NotchTimerService.shared.stop()
@@ -926,6 +939,7 @@ final class NotchService: ObservableObject {
         NotchCalendarService.shared.stop()
         NotchNotificationService.shared.stop()
         AgentUsageService.shared.pause()
+        PaperclipCrewService.shared.pause()
         settingsSignature = ""
         expanded = false
         peeking = false
@@ -3154,6 +3168,16 @@ final class NotchService: ObservableObject {
             AgentUsageService.shared.$snapshot
                 .map { ($0.loaded, $0.live.isEmpty, $0.seen, Set($0.live.map(\.provider))) }
                 .removeDuplicates(by: ==)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.syncMenuSpaceMonitoring()
+                    self?.objectWillChange.send()
+                    self?.refreshPresentation()
+                }.store(in: &subscriptions)
+            // The crew's runs open and close the strip like a local agent's turn.
+            PaperclipCrewService.shared.$snapshot
+                .map { [$0.isWorking ? 1 : 0, min(3, $0.working.count)] }
+                .removeDuplicates()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in
                     self?.syncMenuSpaceMonitoring()

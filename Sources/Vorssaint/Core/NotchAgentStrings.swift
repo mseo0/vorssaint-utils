@@ -122,6 +122,7 @@ struct NotchAgentStrings {
 
     func card(_ card: NotchAgentCard) -> String {
         switch card {
+        case .crew: return NotchCrewStrings.title
         case .limits: return limitsCard
         case .spend: return spendCard
         case .live: return liveCard
