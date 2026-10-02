@@ -245,17 +245,25 @@ final class PaperclipCrewService: ObservableObject {
         next.loaded = true
         guard let companies: [Company] = await get(base, "api/companies") else { return next }
         let chosen = (UserDefaults.standard.string(forKey: DefaultsKey.paperclipCrewCompany) ?? "").trimmed
-        let company = companies.first { $0.id == chosen || $0.name.caseInsensitiveCompare(chosen) == .orderedSame }
-            ?? companies.first { $0.status == nil || $0.status == "active" }
-        guard let company else { next.reachable = true; return next }
-        async let agents: [PaperclipAgent]? = get(base, "api/companies/\(company.id)/agents")
-        async let runs: [PaperclipRun]? = get(base, "api/companies/\(company.id)/live-runs")
-        guard let agents = await agents else { return next }
+        // Names repeat (an onboarding run twice leaves two of the same name),
+        // so an id wins, and of several candidates the first with agents does.
+        let candidates = companies.filter { $0.id == chosen }.nilIfEmpty
+            ?? companies.filter { !chosen.isEmpty && $0.name.caseInsensitiveCompare(chosen) == .orderedSame }.nilIfEmpty
+            ?? companies.filter { $0.status == nil || $0.status == "active" }
+        guard !candidates.isEmpty else { next.reachable = true; return next }
+        var picked: (company: Company, agents: [PaperclipAgent])?
+        for company in candidates {
+            guard let agents: [PaperclipAgent] = await get(base, "api/companies/\(company.id)/agents") else { return next }
+            if picked == nil { picked = (company, agents) }
+            if agents.contains(where: { $0.status != "terminated" }) { picked = (company, agents); break }
+        }
+        guard let picked else { return next }
+        let runs: [PaperclipRun]? = await get(base, "api/companies/\(picked.company.id)/live-runs")
         next.reachable = true
-        next.companyID = company.id
-        next.companyName = company.name
-        next.agents = agents
-        next.runs = (await runs ?? []).filter { $0.status == "running" || $0.status == "queued" }
+        next.companyID = picked.company.id
+        next.companyName = picked.company.name
+        next.agents = picked.agents
+        next.runs = (runs ?? []).filter { $0.status == "running" || $0.status == "queued" }
         return next
     }
 
@@ -336,4 +344,8 @@ final class PaperclipCrewService: ObservableObject {
 
 private extension String {
     var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+}
+
+private extension Array {
+    var nilIfEmpty: [Element]? { isEmpty ? nil : self }
 }
