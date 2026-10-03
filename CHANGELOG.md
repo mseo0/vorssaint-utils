@@ -23,6 +23,7 @@ On macOS 27 the Volume mixer can send a single app to an AirPlay speaker, clipbo
 - The AI Agents page follows OpenCode too, next to Claude Code and Codex. Its tokens, costs, models and working tasks come from OpenCode's own database on this Mac, which is read again at each launch. Settings → Dynamic Island → Content → AI Agents → OpenCode.
 - The closed island can show the limit you pick instead of the one closest to running out. Choose Session, Week or Most used, which stays the default. The resting wings, the capsule and the Lock Screen follow the same choice. Settings → Dynamic Island → Content → AI Agents → Limit to show.
 - The AI Agents page picks up where the last launch stopped and reads only what Claude Code and Codex wrote since, instead of every log of the last 13 weeks. What it keeps for that is in the app's cache folder and is deleted when the section is turned off.
+- The AI Agents page keeps its usage current when macOS misses a log change. A new session's log is found within five minutes even when its file event never arrives, a session resumed days later is followed again within half a minute, and if the log folders cannot be watched at all they are checked every half minute instead.
 
 ### Added
 - The recording editor's Copy button has a menu with Copy as GIF, which copies the edited recording as an animated GIF ready to paste. Copy and ⌘C still copy the video.

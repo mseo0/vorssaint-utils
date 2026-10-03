@@ -39,6 +39,9 @@ final class AgentUsageService: ObservableObject {
     /// How often progress is saved while agents write, besides on quit and
     /// pause; a launch after a crash reads again only what came after.
     private static let saveInterval: TimeInterval = 5 * 60
+    /// How often the log folders are walked again, for logs whose file
+    /// events never arrived: the system can coalesce or drop them.
+    private static let rescanInterval: TimeInterval = 5 * 60
 
     private let queue = DispatchQueue(label: "com.vorssaint.agent-usage", qos: .utility, autoreleaseFrequency: .workItem)
     private let home = FileManager.default.homeDirectoryForCurrentUser
@@ -73,6 +76,9 @@ final class AgentUsageService: ObservableObject {
     private var cursors: [String: AgentLogCursor] = [:]
     private var watcher: AgentLogWatcher?
     private var watchedRoots: [AgentLogRoot] = []
+    /// False when the folders could not be watched; reading then relies on
+    /// looking at them every tick.
+    private var watching = false
     private var poller: DispatchSourceTimer?
     private var publishScheduled = false
     /// The last snapshot handed over, to tell when time alone changes it.
@@ -128,6 +134,7 @@ final class AgentUsageService: ObservableObject {
             poller?.cancel()
             poller = nil
             watcher?.stop()
+            watching = false
             saveProgress()
         }
     }
@@ -170,6 +177,7 @@ final class AgentUsageService: ObservableObject {
             watcher?.stop()
             watcher = nil
             watchedRoots = []
+            watching = false
             store = AgentUsageStore()
             cursors.removeAll()
             published = AgentUsageSnapshot()
@@ -340,17 +348,33 @@ final class AgentUsageService: ObservableObject {
         var changed = false
         for (path, cursor) in cursors
         where working.contains(path) || now.timeIntervalSince(cursor.modified) < window {
-            if cursor.provider == .opencode {
-                // A database changes in place: its write-ahead log grows instead.
-                if let modified = AgentOpenCodeReader.modified(path), modified <= cursor.modified { continue }
-                if read(path, provider: cursor.provider) { changed = true }
-                continue
-            }
-            var info = stat()
-            let exists = stat(path, &info) == 0
-            guard !exists || UInt64(max(0, info.st_size)) != cursor.offset
-                    || UInt64(info.st_ino) != cursor.identity else { continue }
+            guard Self.moved(cursor) else { continue }
             if read(path, provider: cursor.provider) { changed = true }
+        }
+        return changed
+    }
+
+    /// True when a log grew, shrank, was replaced or disappeared since it
+    /// was last read.
+    private static func moved(_ cursor: AgentLogCursor) -> Bool {
+        if cursor.provider == .opencode {
+            // A database changes in place: its write-ahead log grows instead.
+            guard let modified = AgentOpenCodeReader.modified(cursor.path) else { return true }
+            return modified > cursor.modified
+        }
+        var info = stat()
+        guard stat(cursor.path, &info) == 0 else { return true }
+        return UInt64(max(0, info.st_size)) != cursor.offset || UInt64(info.st_ino) != cursor.identity
+    }
+
+    /// Walks the log folders and reads the logs not seen yet, or changed
+    /// since they were read, which file events may have missed. True when
+    /// that changed what is stored.
+    private func readMissedLogs(_ roots: [AgentLogRoot], now: Date) -> Bool {
+        var changed = false
+        for file in AgentLogReader.discover(roots, since: now.addingTimeInterval(-Self.horizon)) {
+            if let cursor = cursors[file.path], !Self.moved(cursor) { continue }
+            if read(file.path, provider: file.provider) { changed = true }
         }
         return changed
     }
@@ -409,7 +433,12 @@ final class AgentUsageService: ObservableObject {
                 self?.filesChanged(paths, rescan: rescan)
             }
         }
-        if existing.isEmpty { watcher?.stop() } else { watcher?.start(existing.map(\.url.path)) }
+        if existing.isEmpty {
+            watcher?.stop()
+            watching = false
+        } else {
+            watching = watcher?.start(existing.map(\.url.path)) ?? false
+        }
     }
 
     private func filesChanged(_ paths: [String], rescan: Bool) {
@@ -455,18 +484,16 @@ final class AgentUsageService: ObservableObject {
             store.closeIdleTurns(now: now, after: NotchAgentSupport.idleTurn)
             store.dropRecords(before: now.addingTimeInterval(-Self.horizon))
             // A log kept open through a long pause reports nothing when work
-            // resumes; the day's logs are looked at less often than recent ones.
-            var changed = pollOpenLogs(within: 86_400)
-            // A folder that appears later, like a first Codex session, is
-            // picked up without a restart.
-            if now.timeIntervalSince(lastRootCheck) > 300 {
+            // resumes, as does an older session picked up again: every known
+            // log is looked at here, less often than recent ones.
+            var changed = pollOpenLogs(within: .infinity)
+            // A folder that appears later, like a first Codex session, and a
+            // new log whose file event was lost are picked up without a
+            // restart. Unwatched folders are looked at every tick.
+            if !watching || now.timeIntervalSince(lastRootCheck) >= Self.rescanInterval {
                 let roots = AgentLogRoot.all(home: home).filter { enabled.contains($0.provider) }
-                if roots.filter(\.exists) != watchedRoots {
-                    for file in AgentLogReader.discover(roots, since: now.addingTimeInterval(-Self.horizon)) {
-                        if read(file.path, provider: file.provider) { changed = true }
-                    }
-                    watch(roots)
-                }
+                if readMissedLogs(roots, now: now) { changed = true }
+                if roots.filter(\.exists) != watchedRoots || !watching { watch(roots) }
                 lastRootCheck = now
                 readClaudePlan()
             }
