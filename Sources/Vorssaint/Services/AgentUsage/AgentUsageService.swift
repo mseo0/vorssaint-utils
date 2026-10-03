@@ -89,6 +89,9 @@ final class AgentUsageService: ObservableObject {
     private var claudeProfileModified: Date?
     private var claudeAppModified: Date?
     private var claudeAppSamples: [AgentClaudeAppUsage.Sample] = []
+    /// When Claude Code last reported its limits, and what it reported.
+    private var claudeCodeModified: Date?
+    private var claudeCodeData: Data?
     private var shippedPrices: AgentPriceList?
     private var previousLimits: [AgentProvider: AgentLimits] = [:]
     /// Warned windows, each waiting for its renewal.
@@ -189,6 +192,8 @@ final class AgentUsageService: ObservableObject {
             claudeProfileModified = nil
             claudeAppModified = nil
             claudeAppSamples = []
+            claudeCodeModified = nil
+            claudeCodeData = nil
             savedMark = nil
             lastSave = .distantPast
         }
@@ -323,8 +328,9 @@ final class AgentUsageService: ObservableObject {
             guard let self else { return }
             let read = self.pollOpenLogs(within: Self.pollWindow)
             let stopped = self.store.closeSettledTurns(now: Date())
+            let limits = self.claudeCodeReported()
             // After the logs, so a turn its last lines ended ends as usual.
-            guard self.closeEndedTurns(self.watchedRoots) || read || stopped else { return }
+            guard self.closeEndedTurns(self.watchedRoots) || read || stopped || limits else { return }
             self.checkLimits()
             self.schedulePublish()
         }
@@ -632,15 +638,40 @@ final class AgentUsageService: ObservableObject {
                                         ?? account["userRateLimitTier"] as? String)
     }
 
-    /// Reads the limits the Claude app saved when the file changes, and
-    /// places them at `now` on every call, since a session ages out between
-    /// saves. Runs on `queue`.
+    /// True when Claude Code reported its limits again since the last look,
+    /// which then reads them: a reply shows its limits within seconds.
+    /// Runs on `queue`.
+    private func claudeCodeReported() -> Bool {
+        guard enabled.contains(.claude), AgentClaudeCodeLimits.modified(home: home) != claudeCodeModified else {
+            return false
+        }
+        readClaudeApp(now: Date())
+        return true
+    }
+
+    /// Reads the limits Claude Code reported and the Claude app saved when
+    /// their files change, and places them at `now` on every call, since a
+    /// session ages out between saves. Claude Code's are exact; the app's
+    /// fill in what it does not report. Runs on `queue`.
     private func readClaudeApp(now: Date) {
         guard enabled.contains(.claude) else {
-            if store.limits[.claude]?.source == .claudeApp { store.clearLimits(.claude) }
+            if let source = store.limits[.claude]?.source, source == .claudeApp || source == .claudeCode {
+                store.clearLimits(.claude)
+            }
             claudeAppModified = nil
             claudeAppSamples = []
+            claudeCodeModified = nil
+            claudeCodeData = nil
             return
+        }
+        let codeModified = AgentClaudeCodeLimits.modified(home: home)
+        if codeModified != claudeCodeModified {
+            claudeCodeModified = codeModified
+            claudeCodeData = codeModified == nil ? nil : try? Data(contentsOf: AgentClaudeCodeLimits.readingURL(home: home))
+        }
+        var code: AgentLimits?
+        if let claudeCodeData, let claudeCodeModified {
+            code = AgentClaudeCodeLimits.limits(from: claudeCodeData, observedAt: claudeCodeModified, now: now)
         }
         let url = AgentClaudeAppUsage.historyURL(home: home)
         let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
@@ -652,10 +683,11 @@ final class AgentUsageService: ObservableObject {
         // Claude Code's own first request can place the session's start.
         let start = AgentClaudeAppUsage.sessionStart(store.records, samples: claudeAppSamples,
                                                      organization: claudeOrganization)
-        if let limits = AgentClaudeAppUsage.limits(from: claudeAppSamples, now: now, sessionStart: start,
-                                                   organization: claudeOrganization) {
+        let app = AgentClaudeAppUsage.limits(from: claudeAppSamples, now: now, sessionStart: start,
+                                             organization: claudeOrganization)
+        if let limits = AgentClaudeCodeLimits.merged(code, app) {
             store.setLimits(limits)
-        } else if store.limits[.claude]?.source == .claudeApp {
+        } else if let source = store.limits[.claude]?.source, source == .claudeApp || source == .claudeCode {
             store.clearLimits(.claude)
         }
     }

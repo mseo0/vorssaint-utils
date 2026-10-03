@@ -30,6 +30,7 @@ enum NotchAgentTests {
         AgentUsageArchiveSettleTests.run(suite)
         AgentUsageArchiveSaveTests.run(suite)
         claudeApp(suite)
+        claudeCode(suite)
         AgentCodexResetTests.run(suite)
         PaperclipCrewTests.run(suite)
         preferences(suite)
@@ -2215,6 +2216,103 @@ enum NotchAgentTests {
             return entry
         }
         return (try? JSONSerialization.data(withJSONObject: ["version": version, "samples": entries])) ?? Data()
+    }
+
+    private static func claudeCode(_ suite: TestSuite) {
+        let at = { (time: String) in AgentTimestamp.parse(time)! }
+        let observed = at("2026-09-23T14:20:00Z")
+        let now = at("2026-09-23T14:30:00Z")
+        func input(_ rates: [String: Any]) -> Data {
+            (try? JSONSerialization.data(withJSONObject: ["model": ["id": "x"], "rate_limits": rates])) ?? Data()
+        }
+        let session = at("2026-09-23T17:00:00Z"), week = at("2026-09-27T09:00:00Z")
+        let full = input(["five_hour": ["used_percentage": 23.5, "resets_at": session.timeIntervalSince1970],
+                          "seven_day": ["used_percentage": 41.2, "resets_at": week.timeIntervalSince1970]])
+        let reading = AgentClaudeCodeLimits.limits(from: full, observedAt: observed, now: now)
+        suite.expect(reading?.source == .claudeCode && reading?.observedAt == observed
+                        && reading?.windows.map(\.id) == ["claude.fh", "claude.sd"]
+                        && reading?.windows.map(\.usedPercent) == [23.5, 41.2]
+                        && reading?.windows.map(\.resetsAt) == [session, week],
+                     "Claude Code's status line gives the session and the week with their exact renewals")
+        suite.expect(AgentClaudeCodeLimits.limits(from: full, observedAt: observed, now: at("2026-09-23T18:00:00Z"))?
+                        .windows.map(\.kind) == [.weekly]
+                        && AgentClaudeCodeLimits.limits(from: full, observedAt: observed, now: at("2026-10-01T15:00:00Z")) == nil
+                        && AgentClaudeCodeLimits.limits(from: input([:]), observedAt: observed, now: now) == nil
+                        && AgentClaudeCodeLimits.limits(from: Data("{".utf8), observedAt: observed, now: now) == nil,
+                     "a renewed window, a week-old reading and an input without limits give nothing")
+
+        let app = AgentLimits(provider: .claude, windows: [
+            AgentLimitWindow(id: "claude.fh", kind: .session, minutes: 300, scope: nil, usedPercent: 30,
+                             resetsAt: at("2026-09-23T17:40:00Z")),
+            AgentLimitWindow(id: "claude.so", kind: .weekly, minutes: 10_080, scope: "Opus", usedPercent: 12, resetsAt: nil)],
+            observedAt: at("2026-09-23T14:25:00Z"), source: .claudeApp)
+        let merged = AgentClaudeCodeLimits.merged(reading, app)
+        suite.expect(merged?.windows.map(\.id) == ["claude.fh", "claude.so", "claude.sd"]
+                        && merged?.windows.first?.usedPercent == 30 && merged?.windows.first?.resetsAt == session,
+                     "a newer app reading moves the share but keeps Claude Code's exact renewal, and adds its own windows")
+        let older = AgentLimits(provider: .claude, windows: app.windows, observedAt: at("2026-09-23T14:00:00Z"),
+                                source: .claudeApp)
+        let preferred = AgentClaudeCodeLimits.merged(reading, older)
+        suite.expect(preferred?.source == .claudeCode && preferred?.windows.map(\.id) == ["claude.fh", "claude.sd", "claude.so"]
+                        && preferred?.windows.first?.usedPercent == 23.5
+                        && AgentClaudeCodeLimits.merged(nil, app) == app && AgentClaudeCodeLimits.merged(reading, nil) == reading,
+                     "a newer Claude Code reading wins, and either source stands alone")
+
+        let home = FileManager.default.temporaryDirectory.appending(path: "vorss-claude-code-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let settings = AgentClaudeCodeLimits.settingsURL(home: home)
+        try? FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original: [String: Any] = ["model": "opus",
+                                       "statusLine": ["type": "command", "command": "~/bin/line.sh", "padding": 1]]
+        try? JSONSerialization.data(withJSONObject: original).write(to: settings)
+        func stored() -> [String: Any] {
+            (try? Data(contentsOf: settings)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any] ?? [:]
+        }
+        var connected = (try? AgentClaudeCodeLimits.connect(home: home)) != nil
+        connected = (try? AgentClaudeCodeLimits.connect(home: home)) != nil && connected
+        let line = stored()["statusLine"] as? [String: Any]
+        let previous = try? String(contentsOf: AgentClaudeCodeLimits.folder(home: home).appending(path: "previous-command"),
+                                   encoding: .utf8)
+        suite.expect(connected && AgentClaudeCodeLimits.isConnected(home: home)
+                        && line?["command"] as? String == AgentClaudeCodeLimits.command(home: home)
+                        && line?["padding"] as? Int == 1 && stored()["model"] as? String == "opus"
+                        && previous == "~/bin/line.sh"
+                        && FileManager.default.isExecutableFile(atPath: AgentClaudeCodeLimits.scriptURL(home: home).path),
+                     "connecting points the status line at the script, keeps the other settings and the earlier command, even twice")
+        let disconnected = (try? AgentClaudeCodeLimits.disconnect(home: home)) != nil
+        suite.expect(disconnected && !AgentClaudeCodeLimits.isConnected(home: home)
+                        && (stored()["statusLine"] as? [String: Any])?["command"] as? String == "~/bin/line.sh"
+                        && (stored()["statusLine"] as? [String: Any])?["padding"] as? Int == 1
+                        && !FileManager.default.fileExists(atPath: AgentClaudeCodeLimits.scriptURL(home: home).path),
+                     "disconnecting puts the earlier status line back and removes the script")
+        try? Data("{ not json".utf8).write(to: settings)
+        var failure: AgentClaudeCodeLimits.Failure?
+        do { try AgentClaudeCodeLimits.connect(home: home) } catch { failure = error as? AgentClaudeCodeLimits.Failure }
+        suite.expect(failure == .unreadableSettings
+                        && (try? String(contentsOf: settings, encoding: .utf8)) == "{ not json",
+                     "settings that are not a JSON object are left as they are")
+
+        // The script itself keeps a reading and still runs the earlier status line.
+        try? AgentClaudeCodeLimits.disconnect(home: home)
+        try? FileManager.default.removeItem(at: settings)
+        try? JSONSerialization.data(withJSONObject: ["statusLine": ["type": "command", "command": "cat >/dev/null; echo earlier"]])
+            .write(to: settings)
+        try? AgentClaudeCodeLimits.connect(home: home)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [AgentClaudeCodeLimits.scriptURL(home: home).path]
+        let stdin = Pipe(), stdout = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        try? process.run()
+        stdin.fileHandleForWriting.write(full)
+        try? stdin.fileHandleForWriting.close()
+        process.waitUntilExit()
+        let shown = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+        let kept = (try? Data(contentsOf: AgentClaudeCodeLimits.readingURL(home: home)))
+            .flatMap { AgentClaudeCodeLimits.limits(from: $0, observedAt: observed, now: now) }
+        suite.expect(shown == "earlier\n" && kept == reading,
+                     "the status line script saves what Claude Code reports and shows the earlier status line")
     }
 
     private static func claudeApp(_ suite: TestSuite) {

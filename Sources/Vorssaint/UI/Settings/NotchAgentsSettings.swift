@@ -32,6 +32,11 @@ struct NotchAgentsSettingsControls: View {
     @State private var claudeApp: URL?
     /// Read from the file while the section is off and the service is idle.
     @State private var claudeAppFileCheck: Date?
+    /// Whether Claude Code's status line reports to Vorssaint, looked up
+    /// when the page opens; nil until then.
+    @State private var claudeCodeConnected: Bool?
+    @State private var claudeCodeReported: Date?
+    @State private var claudeCodeFailure: String?
 
     private var text: NotchAgentStrings { FeatureStrings.notchAgents(l10n.language) }
     private var locale: Locale { l10n.language.formattingLocale() }
@@ -161,7 +166,9 @@ struct NotchAgentsSettingsControls: View {
                 Divider()
                 Text(text.claudeLimitsTitle).font(.subheadline.weight(.medium))
                 TimelineView(.periodic(from: .now, by: 30)) { context in
-                    claudeLimitsStatus(now: context.date)
+                    claudeCodeStatus(now: context.date)
+                    // Claude Code's exact readings make the app's unneeded.
+                    if claudeCodeConnected != true { claudeLimitsStatus(now: context.date) }
                 }
                 Text(text.claudeLimitsPrivacy).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -171,9 +178,9 @@ struct NotchAgentsSettingsControls: View {
         .onAppear {
             findRoots()
             // An agent turned off is not read at all, not even for its status.
-            if claude { findClaudeApp() }
+            if claude { findClaudeApp(); findClaudeCode() }
         }
-        .onChange(of: claude) { _, on in if on { findClaudeApp() } }
+        .onChange(of: claude) { _, on in if on { findClaudeApp(); findClaudeCode() } }
         // Cards and agents set the page's height, and the live reading the
         // closed island's width, which the island follows.
         .onChange(of: [cardOrder, hiddenCards, String(claude), String(codex),
@@ -217,6 +224,65 @@ struct NotchAgentsSettingsControls: View {
         }
         .font(.callout)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Claude Code's own limits: exact, and current after every reply.
+    @ViewBuilder private func claudeCodeStatus(now: Date) -> some View {
+        let connected = claudeCodeConnected == true
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: connected ? "checkmark.circle.fill" : "terminal")
+                .foregroundStyle(connected ? Color.green : Color.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(connected ? "Exact limits from Claude Code" : "Get exact limits from Claude Code")
+                Group {
+                    if let claudeCodeFailure {
+                        Text(claudeCodeFailure).foregroundStyle(.orange)
+                    } else if connected {
+                        if let reported = claudeCodeReported {
+                            Text("Last reported \(relative(reported, now: now)). Updates after each Claude Code reply.")
+                        } else {
+                            Text("Shows after your next Claude Code reply.")
+                        }
+                    } else {
+                        Text("Adds a status line to ~/.claude/settings.json that keeps the session and weekly limits "
+                             + "Claude Code reports after each reply, with their exact renewal times. "
+                             + "A status line you already have keeps working.")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            if let claudeCodeConnected {
+                Button(claudeCodeConnected ? "Disconnect" : "Connect") { setClaudeCode(!claudeCodeConnected) }
+            }
+        }
+        .font(.callout)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func setClaudeCode(_ connect: Bool) {
+        do {
+            if connect { try AgentClaudeCodeLimits.connect() } else { try AgentClaudeCodeLimits.disconnect() }
+            claudeCodeFailure = nil
+        } catch AgentClaudeCodeLimits.Failure.unreadableSettings {
+            claudeCodeFailure = "~/.claude/settings.json isn’t valid JSON, so it was left as it is."
+        } catch {
+            claudeCodeFailure = "Couldn’t change ~/.claude/settings.json."
+        }
+        findClaudeCode()
+        usage.pageDidAppear()
+    }
+
+    private func findClaudeCode() {
+        DispatchQueue.global(qos: .utility).async {
+            let connected = AgentClaudeCodeLimits.isConnected()
+            let reported = AgentClaudeCodeLimits.modified()
+            DispatchQueue.main.async {
+                claudeCodeConnected = connected
+                claudeCodeReported = reported
+            }
+        }
     }
 
     private func relative(_ date: Date, now: Date) -> String {

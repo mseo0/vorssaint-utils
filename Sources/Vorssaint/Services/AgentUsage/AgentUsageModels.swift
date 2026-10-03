@@ -102,6 +102,8 @@ struct AgentLimits: Equatable {
         case sessionLog
         /// Asked of the agent on request, which checks the account itself.
         case account
+        /// Reported by Claude Code to its status line with each reply.
+        case claudeCode
     }
 
     let provider: AgentProvider
